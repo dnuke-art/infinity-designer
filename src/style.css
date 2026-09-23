@@ -27,7 +27,8 @@ button.danger:hover { border-color: #ff6b6b; color: #ff6b6b; }
 .row > button.small { flex: 0 0 auto; padding: 3px 8px; font-size: 11px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
-.grid3 label.n input, .grid2 label.n input { width: 100%; }
+.grid3 label.n input, .grid2 label.n input, .grid3 label.n select { width: 100%; }
+.grid3 > button { align-self: end; }
 .mat { display: flex; flex-direction: column; gap: 6px; }
 details summary { cursor: pointer; color: var(--dim); font-size: 12px; }
 textarea { width: 100%; min-height: 240px; resize: vertical; font: 11px/1.35 ui-monospace, monospace;

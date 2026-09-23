@@ -67,6 +67,15 @@ export interface StripParams {
   radius: number;
   /** viewing angle in degrees (full angle at half intensity, the datasheet figure; bare SMD strips are ~120). 180 or more = omnidirectional */
   cone?: number;
+  /**
+   * radius in mm of a diffuser tube around the strip (neon-flex, opal channel); 0 = bare
+   * LEDs. The tube glows with the LED dots blurred along it and emits in every direction.
+   */
+  tube?: number;
+  /** diffusion length in mm along the tube (Gaussian sigma); default 1.5 × tube radius. Shorter shows hot spots */
+  blur?: number;
+  /** fraction of the light the diffuser lets out; opal ~0.7 */
+  diffuserT?: number;
 }
 
 export interface EdgeStrip extends Partial<StripParams> {
@@ -166,6 +175,8 @@ export interface Cap {
   kind: 0 | 1 | 2;
   /** emission axis (unit) and half-intensity half angle in radians; cosHalf -1 = omnidirectional */
   dir: V3; cosHalf: number;
+  /** diffuser: blur sigma along the strip in mm (0 = bare LEDs) and the diffuser's transmission */
+  blur: number; diffuserT: number;
   ref: Sel;
 }
 export interface Compiled {
@@ -257,11 +268,12 @@ export function compile(scene: Scene): Compiled {
   const D = scene.edgeDefaults;
   let base = 0;
   const coneOf = (deg: number | undefined) => deg === undefined || deg >= 180 ? -1 : Math.max(0.05, deg * Math.PI / 360);
-  const pushCap = (a: V3, b: V3, color: V3, radiance: number, pitch: number, radius: number, reverse: boolean | undefined,
-    dir: V3, cosHalf: number, ref: Sel) => {
+  const pushCap = (a: V3, b: V3, p: StripParams, reverse: boolean | undefined, dir: V3, cosHalf: number, ref: Sel) => {
     if (reverse) [a, b] = [b, a];
-    const count = pitch > 0 ? Math.floor(len(sub(b, a)) / pitch + 1e-6) + 1 : 1;
-    caps.push({ a, b, color, radiance, pitch, radius, base, count, kind: 0, dir, cosHalf, ref });
+    const count = p.pitch > 0 ? Math.floor(len(sub(b, a)) / p.pitch + 1e-6) + 1 : 1;
+    const tube = p.tube ?? 0;
+    caps.push({ a, b, color: p.color, radiance: p.radiance, pitch: p.pitch, radius: tube > 0 ? tube : p.radius, base, count, kind: 0,
+      dir, cosHalf: tube > 0 ? -1 : cosHalf, blur: tube > 0 ? (p.blur ?? tube * 1.5) : 0, diffuserT: p.diffuserT ?? 0.7, ref });
     base += count;
   };
   /** how see-through a shell face is: open 1, else its mean transmit */
@@ -290,7 +302,8 @@ export function compile(scene: Scene): Compiled {
       : Math.abs(o0 - o1) < 1e-6 ? [...e.faces] : [o1 > o0 ? e.faces[1] : e.faces[0]];
     const cone = es.cone ?? D.cone;
     const dir = shade > 0 && lipFaces.length === 1 ? mul(h.normals[lipFaces[0] === e.faces[0] ? e.faces[1] : e.faces[0]], -1) : inward;
-    pushCap(a, b, es.color ?? D.color, es.radiance ?? D.radiance, es.pitch ?? D.pitch, es.radius ?? D.radius,
+    pushCap(a, b, { color: es.color ?? D.color, radiance: es.radiance ?? D.radiance, pitch: es.pitch ?? D.pitch, radius: es.radius ?? D.radius,
+      tube: es.tube ?? D.tube, blur: es.blur ?? D.blur, diffuserT: es.diffuserT ?? D.diffuserT },
       es.reverse, dir, coneOf(cone), { kind: 'edge', i: es.edge });
     for (const viewFace of shade > 0 ? lipFaces : []) {
       const nF = h.normals[viewFace];
@@ -305,7 +318,7 @@ export function compile(scene: Scene): Compiled {
     }
   });
 
-  scene.strips.forEach((s, i) => pushCap(s.a, s.b, s.color, s.radiance, s.pitch, s.radius, s.reverse,
+  scene.strips.forEach((s, i) => pushCap(s.a, s.b, s, s.reverse,
     s.normal ? norm(s.normal) : [0, 0, 1], s.normal ? coneOf(s.cone) : -1, { kind: 'strip', i }));
 
   const sigmaT = scene.fog ? scene.fog.density / 1000 : 0;
@@ -374,6 +387,14 @@ function shaded(): Scene {
   s.name = 'shaded infinity mirror (lips, 120° LEDs)';
   s.edgeDefaults = { ...s.edgeDefaults, cone: 120, shade: 22 };
   s.eye.exposure = 0;
+  return s;
+}
+
+function tubes(): Scene {
+  const s = classic();
+  s.name = 'neon-flex tubes';
+  s.edgeDefaults = { ...s.edgeDefaults, pitch: 1000 / 96, tube: 5, blur: 7, inset: 14, radiance: 22 };
+  s.eye.exposure = -1.5;
   return s;
 }
 
@@ -619,6 +640,7 @@ export const MAT_MASK_IMAGE = `void material(Surf s, float t, inout vec3 R, inou
 export const PRESETS: (() => Scene)[] = [
   classic,
   shaded,
+  tubes,
   tilted,
   switchable,
   ringMask,

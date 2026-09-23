@@ -5,7 +5,7 @@
 // transmit, emit), re-evaluated each frame by one fragment shader that concatenates all
 // the programs. `uImage` is a user-loaded picture any program can sample.
 
-import { Compiled, MAT_HALF_BACKLIT, MAT_MASK_IMAGE, MAT_PLASMA, MAT_RINGS_E, MAT_RING, MAT_SWITCHABLE, Sel } from './scene';
+import { Compiled, MAT_HALF_BACKLIT, MAT_MASK_IMAGE, MAT_PLASMA, MAT_RINGS_E, MAT_RING, MAT_SWITCHABLE, Sel, V3 } from './scene';
 
 export const TILE = 128;
 
@@ -195,6 +195,20 @@ ${dispatch}
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, gl.RGBA, gl.UNSIGNED_BYTE, img);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
+  }
+
+  /** reflect / transmit / emit of material m at the centre of its tiles (after run) */
+  centre(m: number): { R: V3; T: V3; E: V3 } {
+    const gl = this.gl;
+    const px = new Float32Array(4);
+    const grab = (x: number): V3 => {
+      gl.readPixels(x, m * TILE + TILE / 2, 1, 1, gl.RGBA, gl.FLOAT, px);
+      return [px[0], px[1], px[2]];
+    };
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
+    const R = grab(TILE / 2), T = grab(TILE + TILE / 2), E = grab(2 * TILE + TILE / 2);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { R, T, E };
   }
 
   run(t: number) {

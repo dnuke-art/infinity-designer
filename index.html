@@ -24,6 +24,21 @@
           <label class="btn">open<input id="open" type="file" accept=".json" hidden></label>
         </div>
       </section>
+      <section>
+        <h2>render to file</h2>
+        <div class="grid3">
+          <label class="n">width<input id="render-w" type="number" value="2048" min="16" max="8192" step="1"></label>
+          <label class="n">height<input id="render-h" type="number" value="1536" min="16" max="8192" step="1"></label>
+          <label class="n">samples<input id="render-spp" type="number" value="2048" min="1" step="1"></label>
+        </div>
+        <div class="grid3">
+          <label class="n">format<select id="render-fmt"><option value="jpg">jpg</option><option value="png">png</option></select></label>
+          <label class="n">quality<input id="render-q" type="number" value="92" min="10" max="100" step="1"></label>
+          <button id="render-go">render to file</button>
+        </div>
+        <div id="render-status" class="hint">the current view and time, at the size above; the screen shows progress</div>
+        <button id="render-blender">export for Blender (Cycles)</button>
+      </section>
       <details>
         <summary>scene json</summary>
         <textarea id="json" spellcheck="false"></textarea>

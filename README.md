@@ -7,9 +7,9 @@ and see the real thing: every virtual image, dimmed honestly by every bounce.
 Static site, no backend. `npm run build` emits `dist/`.
 
 ```
-npm install
-npm run dev      # http://localhost:5173
-npm run build    # -> dist/
+make dev         # http://localhost:5173  (or: npm install && npm run dev)
+make build       # -> dist/
+make help        # all targets, including the Blender renders
 ```
 
 ## How it works
@@ -60,7 +60,10 @@ select it and edit it in the panel.
   (the datasheet's full angle at half intensity; 120° is a bare SMD strip; the default is
   omnidirectional): emission falls off as a Gaussian in angle and fades out just behind
   the package plane, so a wall-mounted strip still feeds the tunnel at ~20% of its peak.
-  `shadeFace` picks which face carries the lip, or 'both' for an opaque frame band on
+  A `tube` radius wraps the strip in a diffuser (neon-flex, an opal channel): the tube
+  glows with the LED dots blurred along it by `blur` mm, emits in every direction, and
+  passes `diffuserT` of the light (opal ~0.7). A blur shorter than the pitch shows the hot
+  spots a thin diffuser leaves. `shadeFace` picks which face carries the lip, or 'both' for an opaque frame band on
   both faces with the strip shining inward from the corner; left unset, the more
   transparent face gets it, or both when the faces are equally see-through (an infinity
   dodecahedron). A `shade` is an
@@ -110,7 +113,35 @@ select it and edit it in the panel.
   mesh's convex hull. The heart from hvaw-show ships as the "mirror heart" preset.
 
 The scene JSON under the panel is the escape hatch and the file format; `save json` and
-`open` round-trip it.
+`open` round-trip it. "Render to file" traces the current view and time at a chosen size
+and sample count, then saves a JPEG or PNG. "Export for Blender" writes the compiled scene
+at the current time as JSON; `tools/blender_render.py` rebuilds it in Cycles (glossy +
+transparent + emission per face, spheres or coloured tube segments for the LEDs, a
+Principled Volume for fog, the same camera and exposure) and renders headless:
+
+```
+make render SCENE=scenes/neon-flex-tubes.json            # -> renders/neon-flex-tubes.png
+make renders/neon-flex-tubes.jpg SAMPLES=256 RES=1280x800
+make renders                                              # every scenes/*.json
+make blend SCENE=scenes/neon-flex-tubes.json              # interactive: Blender's window, rendered viewport
+make blends/neon-flex-tubes.blend                         # a .blend to reopen later
+```
+
+Interactive mode builds the scene in Blender's window with a Cycles rendered viewport
+looking through the app's camera, camera locked to the view so orbiting moves it and F12
+renders what you see; materials, lights and the camera are then yours to tweak.
+
+The Makefile picks Blender 5.0.1 from /opt when present (5.2 segfaults in its oneAPI probe
+on this machine) and forces the C locale; `make help` lists the targets, and the script can
+also be run directly:
+
+```
+LC_ALL=C LANG=C blender -b -P tools/blender_render.py -- scene-blender.json out.png --samples 512 --res 1920 1080
+```
+
+Cycles brings a denoiser, microfacet glossy and real volumetrics; the app's tracer brings
+the LED emission lobe, shade lips that occlude physically, and laser fan sheets, which the
+export approximates or leaves out (it says so in its `notes`).
 
 ## Scene file
 

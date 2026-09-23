@@ -126,7 +126,7 @@ export function traceLasers(lasers: Laser[], polys: Poly[], caps: Cap[], sigmaT:
       paths.push(out);
       for (const pth of out) for (const s of pth.segs) beams.push({ a: s.a, b: s.b, power: s.power, color: L.color, laser: li });
       if (N === 1 || discrete) for (const pth of out) if (pth.endPoly >= 0)
-        spots.push({ a: pth.end, b: pth.end, color: L.color, radiance: rayPower * N * polys[pth.endPoly].albedo, pitch: 0, radius: w * 1.5, base: -1, count: 1, kind: 1, dir: [0, 0, 1], cosHalf: -1, ref: { kind: 'laser', i: li } });
+        spots.push({ a: pth.end, b: pth.end, color: L.color, radiance: rayPower * N * polys[pth.endPoly].albedo, pitch: 0, radius: w * 1.5, base: -1, count: 1, kind: 1, dir: [0, 0, 1], cosHalf: -1, blur: 0, diffuserT: 1, ref: { kind: 'laser', i: li } });
     }
     // lines on surfaces and sheets in fog between adjacent rays with the same route
     for (let j = 0; j + 1 < N && !discrete; j++) {
@@ -137,7 +137,7 @@ export function traceLasers(lasers: Laser[], polys: Poly[], caps: Cap[], sigmaT:
           const alb = polys[p0.endPoly].albedo;
           // a fan ray's power lands along the line between neighbours: radiance ~ power / (line length · width)
           const L0 = len(sub(p1.end, p0.end)) || 1;
-          spots.push({ a: p0.end, b: p1.end, color: L.color, radiance: (rayPower * alb * 40) / (L0 * 2 * w), pitch: 0, radius: w, base: -1, count: 1, kind: 1, dir: [0, 0, 1], cosHalf: -1, ref: { kind: 'laser', i: li } });
+          spots.push({ a: p0.end, b: p1.end, color: L.color, radiance: (rayPower * alb * 40) / (L0 * 2 * w), pitch: 0, radius: w, base: -1, count: 1, kind: 1, dir: [0, 0, 1], cosHalf: -1, blur: 0, diffuserT: 1, ref: { kind: 'laser', i: li } });
         }
         for (let k = 0; k < Math.min(p0.segs.length, p1.segs.length); k++) {
           const s0 = p0.segs[k], s1 = p1.segs[k];
@@ -147,7 +147,7 @@ export function traceLasers(lasers: Laser[], polys: Poly[], caps: Cap[], sigmaT:
     }
     // plain beams and grating orders glow as volumetric capsules
     if (N === 1 || discrete) for (const b of beams.filter(x => x.laser === li))
-      spots.push({ a: b.a, b: b.b, color: L.color, radiance: b.power, pitch: 0, radius: w, base: -1, count: 1, kind: 2, dir: [0, 0, 1], cosHalf: -1, ref: { kind: 'laser', i: li } });
+      spots.push({ a: b.a, b: b.b, color: L.color, radiance: b.power, pitch: 0, radius: w, base: -1, count: 1, kind: 2, dir: [0, 0, 1], cosHalf: -1, blur: 0, diffuserT: 1, ref: { kind: 'laser', i: li } });
   });
   return { beams, sheets, spots };
 }

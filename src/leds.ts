@@ -196,6 +196,17 @@ export class PatternPass {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
+  /** the current LED colours (rgb, state) for every LED index */
+  read(): Float32Array {
+    const gl = this.gl;
+    const out = new Float32Array(LEDW * this.h * 4);
+    if (!this.count) return out;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbos[this.cur]);
+    gl.readPixels(0, 0, LEDW, this.h, gl.RGBA, gl.FLOAT, out);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return out;
+  }
+
   /** evaluate the pattern at time t into the LED texture */
   run(t: number) {
     const gl = this.gl;

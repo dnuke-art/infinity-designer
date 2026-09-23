@@ -6,6 +6,7 @@ import { Tracer } from './tracer';
 import { Orbit } from './camera';
 import { Line, Overlay } from './overlay';
 import { mouseRay, pick } from './pick';
+import { blenderExport } from './export';
 
 // --- dom helpers -----------------------------------------------------------------------
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -61,7 +62,10 @@ try {
 catch (e) { status.textContent = `GPU: ${(e as Error).message}`; throw e; }
 const orbit = new Orbit(canvas);
 let renderScale = 1;
+/** an offline render in progress: the buffers are at its size until it finishes */
+let job: { w: number; h: number; target: number; format: 'jpg' | 'png'; quality: number } | null = null;
 function fit() {
+  if (job) return;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   tracer.resize(Math.max(1, Math.round(canvas.clientWidth * dpr * renderScale)),
     Math.max(1, Math.round(canvas.clientHeight * dpr * renderScale)));
@@ -338,7 +342,9 @@ function selectionSection() {
         ...pitchFields(() => es.pitch ?? D.pitch, v => { es.pitch = v; rebuild(); }),
         num('radius mm', es.radius ?? D.radius, v => { es.radius = v; rebuild(); }, 0.25, 0.1),
         num('cone °', es.cone ?? D.cone ?? 180, v => { es.cone = v; rebuild(); }, 5, 10, 180),
-        num('shade lip mm', es.shade ?? D.shade ?? 0, v => { es.shade = v; rebuild(); }, 1, 0)),
+        num('shade lip mm', es.shade ?? D.shade ?? 0, v => { es.shade = v; rebuild(); }, 1, 0),
+        num('tube radius mm', es.tube ?? D.tube ?? 0, v => { es.tube = v; rebuild(); }, 0.5, 0),
+        num('blur mm', es.blur ?? D.blur ?? ((es.tube ?? D.tube ?? 0) * 1.5), v => { es.blur = v; rebuild(); }, 0.5, 0.1)),
       (() => {
         const auto = 'auto (viewing face, or both if equal)';
         const opts = [auto, `face ${e.faces[0]}`, `face ${e.faces[1]}`, 'both faces'];
@@ -409,7 +415,9 @@ function selectionSection() {
       el('div', { class: 'grid2' },
         num('radiance', t.radiance, v => { t.radiance = v; rebuild(); }, 1, 0),
         num('radius', t.radius, v => { t.radius = v; rebuild(); }, 0.25, 0.1),
-        ...pitchFields(() => t.pitch, v => { t.pitch = v; rebuild(); })),
+        ...pitchFields(() => t.pitch, v => { t.pitch = v; rebuild(); }),
+        num('tube radius mm', t.tube ?? 0, v => { t.tube = v; rebuild(); }, 0.5, 0),
+        num('blur mm', t.blur ?? ((t.tube ?? 0) * 1.5), v => { t.blur = v; rebuild(); }, 0.5, 0.1)),
       (() => {
         const cb = el('input', { type: 'checkbox' });
         cb.checked = !!t.normal;
@@ -470,8 +478,11 @@ function actionsSection() {
       ...pitchFields(() => D.pitch, v => { D.pitch = v; rebuild(); }),
       num('radius mm', D.radius, v => { D.radius = v; rebuild(); }, 0.25, 0.1),
       num('cone °', D.cone ?? 180, v => { D.cone = v; rebuild(); }, 5, 10, 180),
-      num('shade lip mm', D.shade ?? 0, v => { D.shade = v; rebuild(); }, 1, 0)),
-    el('p', { class: 'hint' }, 'cone 120 is a bare SMD strip; a shade lip sits in the viewing face and hides the strip from the front so only reflections show'));
+      num('shade lip mm', D.shade ?? 0, v => { D.shade = v; rebuild(); }, 1, 0),
+      num('tube radius mm', D.tube ?? 0, v => { D.tube = v; rebuild(); }, 0.5, 0),
+      num('blur mm', D.blur ?? ((D.tube ?? 0) * 1.5), v => { D.blur = v; rebuild(); }, 0.5, 0.1),
+      num('diffuser T', D.diffuserT ?? 0.7, v => { D.diffuserT = v; rebuild(); }, 0.05, 0, 1)),
+    el('p', { class: 'hint' }, 'cone 120 is a bare SMD strip; a shade lip hides the strip from the front; a tube radius wraps the strip in a diffuser (blur shorter than the pitch shows hot spots)'));
 }
 
 function patternSection() {
@@ -525,6 +536,7 @@ function renderPanel() { panel.replaceChildren(shellSection(), selectionSection(
 // --- picking ---------------------------------------------------------------------------------
 let down: { x: number; y: number } | null = null;
 function pickAt(x: number, y: number): Sel | null {
+  if (job) return null;
   const r = canvas.getBoundingClientRect();
   const cam = orbit.basis();
   const { ro, rd } = mouseRay(cam, x - r.left, y - r.top, r.width, r.height);
@@ -583,6 +595,59 @@ bounceIn.oninput = () => { tracer.maxBounce = +bounceIn.value; $('bounces-v').te
 expIn.oninput = () => { tracer.exposure = Math.pow(2, +expIn.value); $('exposure-v').textContent = `${(+expIn.value).toFixed(1)} EV`; };
 scaleIn.oninput = () => { renderScale = +scaleIn.value; $('scale-v').textContent = `${renderScale}×`; fit(); };
 $<HTMLInputElement>('wire').onchange = e => { wire = (e.target as HTMLInputElement).checked; };
+$('render-go').onclick = () => {
+  if (job) { finishJob(false); return; }
+  const w = Math.max(16, Math.min(8192, Math.round(+$<HTMLInputElement>('render-w').value))),
+    h = Math.max(16, Math.min(8192, Math.round(+$<HTMLInputElement>('render-h').value)));
+  const target = Math.max(1, Math.round(+$<HTMLInputElement>('render-spp').value));
+  const format = $<HTMLSelectElement>('render-fmt').value as 'jpg' | 'png';
+  const quality = Math.min(1, Math.max(0.1, +$<HTMLInputElement>('render-q').value / 100));
+  if (playing) { playing = false; renderPanel(); }
+  job = { w, h, target, format, quality };
+  tracer.resize(w, h);
+  tracer.reset();
+  canvas.style.objectFit = 'contain';
+  $('render-go').textContent = 'cancel';
+};
+/** the scene at the current time as JSON for tools/blender_render.py */
+function blenderJSON() {
+  const cols = leds.read();
+  const data = blenderExport(scene, compiled, orbit.basis(), [...orbit.target] as V3, orbit.fov, +expIn.value,
+    i => [cols[i * 4], cols[i * 4 + 1], cols[i * 4 + 2]], m => mats.centre(m));
+  return JSON.stringify(data);
+}
+$('render-blender').onclick = () => {
+  const blob = new Blob([blenderJSON()], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${scene.name.replace(/[^a-z0-9]+/gi, '-')}-blender.json`;
+  a.click();
+  $('render-status').textContent = 'exported; render with: LC_ALL=C LANG=C blender -b -P tools/blender_render.py -- <file> out.png';
+};
+function finishJob(save: boolean) {
+  if (!job) return;
+  if (save) {
+    const { w, h, data } = tracer.readback();
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.getContext('2d')!.putImageData(new ImageData(data, w, h), 0, 0);
+    const type = job.format === 'png' ? 'image/png' : 'image/jpeg';
+    c.toBlob(blob => {
+      if (!blob) { status.textContent = 'render: could not encode the image'; return; }
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${scene.name.replace(/[^a-z0-9]+/gi, '-')}-${w}x${h}.${job?.format ?? 'jpg'}`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    }, type, job.quality);
+  }
+  job = null;
+  canvas.style.objectFit = '';
+  $('render-go').textContent = 'render to file';
+  $('render-status').textContent = save ? 'saved' : 'cancelled';
+  fit();
+  tracer.reset();
+}
 orbit.onChange = () => { updateFog(); tracer.reset(); };
 bounceIn.oninput(new Event('input')); expIn.oninput(new Event('input'));
 
@@ -598,6 +663,20 @@ function tick(now: number) {
   if (playing) time += Math.min(dt, 100) / 1000 * speed;
   leds.run(time);
   mats.run(time);
+  tracer.ledTex = leds.tex;
+  if (job) {
+    // offline render: as many samples as fit in ~40 ms, then save
+    const gl = tracer.gl;
+    const t0 = performance.now();
+    let n = 0;
+    while (tracer.frame < job.target && performance.now() - t0 < 40) { tracer.render(cam, 1); n++; }
+    gl.flush();
+    $('render-status').textContent = `${tracer.frame} / ${job.target} spp · ${job.w}×${job.h}`;
+    $('samples').textContent = `rendering ${tracer.frame}/${job.target} spp · ${n}/frame`;
+    if (tracer.frame >= job.target) { tracer.render(cam, 0); finishJob(true); }
+    requestAnimationFrame(tick);
+    return;
+  }
   // while animating, the accumulator is a moving average over the last dozen frames
   tracer.keep = playing ? 0.9 : 1;
   const active = playing || tracer.frame < CAP;
@@ -616,6 +695,7 @@ requestAnimationFrame(tick);
 // debug handles for the console
 Object.defineProperties(window, {
   tracer: { value: tracer }, orbit: { value: orbit }, fit: { value: fit }, load: { value: load },
-  scene: { get: () => scene }, compiled: { get: () => compiled }, leds: { value: leds }, mats: { value: mats },
+  scene: { get: () => scene }, compiled: { get: () => compiled }, leds: { value: leds }, mats: { value: mats }, blenderJSON: { value: blenderJSON },
+  job: { get: () => job }, finishJob: { value: finishJob },
   play: { value: (v: boolean) => { playing = v; renderPanel(); } }, time: { get: () => time, set: (v: number) => { time = v; } },
 });

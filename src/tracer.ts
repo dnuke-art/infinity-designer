@@ -16,7 +16,9 @@
 //   polygon = 9 texels: (normal, d) (type, albedo, matIndex, boundary) (vertBase, nVerts, 0, 0)
 //                       (reflect rgb, 0) (transmit rgb, 0) (tangent·extent, 0) (bitangent·extent, 0) (centre, 0) (emit rgb, 0)
 //             type 0 matte, 1 mirror/screen, 2 portal (open shell face), 3 laser sheet (tangent = beam dir)
-//   strip   = 5 texels: (a, pitch) (b, radius) (radiance, first LED index, LED count, kind) (colour rgb, thetaHalf) (emission axis, 0)
+//   strip   = 5 texels: (a, pitch) (b, radius) (radiance, first LED index, LED count, kind) (colour rgb, thetaHalf) (emission axis, blur)
+//             blur > 0: a diffuser tube; the LED dots are blurred along the strip with that sigma (mm)
+//             and the tube emits in every direction; the diffuser's transmission is folded into radiance
 //             thetaHalf -1 = omnidirectional, else a datasheet-like lobe: Gaussian in angle, half
 //             intensity at thetaHalf, fading out just behind the package plane
 //             kind 0 LED strip (colours from the LED texture), 1 static emitter, 2 beam glowing in fog
@@ -282,7 +284,19 @@ void main() {
       }
       if (!scattered || reflSince > uImgDepth) {
         vec3 c;
-        if (m.w < 0.5) {
+        float blur = S(b0 + 4).w;
+        if (m.w < 0.5 && blur > 0.0 && a.w > 0.0) {
+          // diffuser tube: sum the nearby LEDs under a Gaussian, scaled so a long blur gives the mean LED colour
+          int count = int(m.z), k0 = int(floor(along / a.w));
+          int span = min(12, int(ceil(3.0 * blur / a.w)));
+          vec3 acc = vec3(0.0);
+          for (int k = k0 - span; k <= k0 + span + 1; k++) {
+            if (k < 0 || k >= count) continue;
+            float d = along - float(k) * a.w;
+            acc += ledColour(int(m.y) + k) * exp(-0.5 * d * d / (blur * blur));
+          }
+          c = acc * (a.w / (blur * 2.5066));
+        } else if (m.w < 0.5) {
           float lit = 1.0;
           int k = 0;
           if (a.w > 0.0) {
@@ -449,7 +463,7 @@ export class Tracer {
     }
     this.nP = c.polys.length;
     const strips: number[] = [];
-    for (const s of c.caps) strips.push(...s.a, s.pitch, ...s.b, s.radius, s.radiance, s.base, s.count, s.kind, ...s.color, s.cosHalf, ...s.dir, 0);
+    for (const s of c.caps) strips.push(...s.a, s.pitch, ...s.b, s.radius, s.radiance * (s.blur > 0 ? s.diffuserT : 1), s.base, s.count, s.kind, ...s.color, s.cosHalf, ...s.dir, s.blur);
     this.nS = c.caps.length;
     // NEE emitters: every real strip, then the virtual images
     const nee: number[] = [];
@@ -476,6 +490,18 @@ export class Tracer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     this.reset();
+  }
+
+  /** the presented image as top-down RGBA bytes; call right after render() */
+  readback(): { w: number; h: number; data: Uint8ClampedArray<ArrayBuffer> } {
+    const gl = this.gl, w = this.w, h = this.h;
+    const raw = new Uint8Array(w * h * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+    const data = new Uint8ClampedArray(new ArrayBuffer(w * h * 4));
+    for (let y = 0; y < h; y++) data.set(raw.subarray((h - 1 - y) * w * 4, (h - y) * w * 4), y * w * 4);
+    for (let i = 3; i < data.length; i += 4) data[i] = 255;
+    return { w, h, data };
   }
 
   /** trace `spp` more samples per pixel (0 = none) and present the running average */
