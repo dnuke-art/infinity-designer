@@ -413,10 +413,10 @@ export class Tracer {
   matTex: WebGLTexture | null = null;
   fog: FogParams = { sigmaT: 0, albedo: [1, 1, 1], g: 0, eyeInside: false };
 
-  constructor(readonly canvas: HTMLCanvasElement) {
-    const gl = canvas.getContext('webgl2', { antialias: false, preserveDrawingBuffer: false });
+  constructor(readonly canvas: HTMLCanvasElement, gl?: WebGL2RenderingContext) {
+    gl ??= canvas.getContext('webgl2', { antialias: false, preserveDrawingBuffer: false }) ?? undefined;
     if (!gl) throw new Error('WebGL2 not available');
-    if (!gl.getExtension('EXT_color_buffer_float')) throw new Error('EXT_color_buffer_float not available');
+    if (!gl.getExtension('EXT_color_buffer_float')) throw new Error('EXT_color_buffer_float not available (float render targets)');
     this.gl = gl;
     this.trace = program(gl, VS, TRACE_FS);
     this.show = program(gl, VS, SHOW_FS);
@@ -552,6 +552,29 @@ export class Tracer {
     gl.uniform1f(this.uni.uExposure, this.exposure);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
+}
+
+/**
+ * Get a WebGL2 context, retrying for a while: Chrome sometimes returns null on the very
+ * first request in a freshly opened tab and succeeds a moment later. Resolves with the
+ * context, or rejects with the browser's own reason and a hint.
+ */
+export async function acquireGL(canvas: HTMLCanvasElement, tries = 24, waitMs = 250): Promise<WebGL2RenderingContext> {
+  let reason = '';
+  const onErr = (e: Event) => { reason = (e as WebGLContextEvent).statusMessage || reason; };
+  canvas.addEventListener('webglcontextcreationerror', onErr);
+  try {
+    for (let i = 0; i < tries; i++) {
+      const gl = canvas.getContext('webgl2', { antialias: false, preserveDrawingBuffer: false });
+      if (gl) return gl;
+      await new Promise(r => setTimeout(r, waitMs));
+    }
+  } finally { canvas.removeEventListener('webglcontextcreationerror', onErr); }
+  const probe = document.createElement('canvas').getContext('webgl');
+  const hint = probe
+    ? 'this browser has WebGL 1 but not WebGL2: update it, or on Safari enable WebGL2 in Develop → Feature Flags'
+    : 'WebGL is off: enable hardware acceleration (chrome://settings/system, then chrome://gpu to check), or try another browser';
+  throw new Error(`WebGL2 not available${reason ? ` (${reason})` : ''}. ${hint}`);
 }
 
 /** camera basis from eye, target, vertical fov (deg) */

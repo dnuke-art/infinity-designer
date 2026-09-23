@@ -2,7 +2,7 @@ import { Compiled, Laser, Material, PRESETS, Scene, Sel, V3, compile, dot, ledMa
 import { PATTERNS, PATTERN_API, PatternPass } from './leds';
 import { MATERIALS, MATERIAL_API, MaterialPass } from './mats';
 import { LIBRARY, parseSTL } from './poly';
-import { Tracer } from './tracer';
+import { Tracer, acquireGL } from './tracer';
 import { Orbit } from './camera';
 import { Line, Overlay } from './overlay';
 import { mouseRay, pick } from './pick';
@@ -54,12 +54,16 @@ function color(label: string, value: V3, on: (v: V3) => void) {
 const canvas = $<HTMLCanvasElement>('view');
 const status = $('status');
 let tracer: Tracer, overlay: Overlay, leds: PatternPass, mats: MaterialPass;
+status.textContent = 'starting the GPU…';
+let gl0: WebGL2RenderingContext;
+try { gl0 = await acquireGL(canvas); }
+catch (e) { status.textContent = `GPU: ${(e as Error).message}`; throw e; }
 try {
-  tracer = new Tracer(canvas); overlay = new Overlay(tracer.gl);
+  tracer = new Tracer(canvas, gl0); overlay = new Overlay(tracer.gl);
   leds = new PatternPass(tracer.gl); tracer.ledTex = leds.tex;
   mats = new MaterialPass(tracer.gl); tracer.matTex = mats.tex;
-}
-catch (e) { status.textContent = `GPU: ${(e as Error).message}`; throw e; }
+  status.textContent = '';
+} catch (e) { status.textContent = `GPU: ${(e as Error).message}`; throw e; }
 const orbit = new Orbit(canvas);
 let renderScale = 1;
 /** an offline render in progress: the buffers are at its size until it finishes */
