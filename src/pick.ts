@@ -70,7 +70,8 @@ export function pick(c: Compiled, ro: V3, rd: V3, pixel: number): Sel | null {
     if (t > 0 && t < thinT) { thinT = t; thinSel = sel; }
   };
   c.hull.edges.forEach((e, i) => tryCap(c.hull.verts[e.a], c.hull.verts[e.b], 0, { kind: 'edge', i }));
-  c.caps.forEach(cp => tryCap(cp.a, cp.b, cp.radius, cp.ref));
+  c.caps.forEach(cp => { if (cp.ref.kind !== 'laser') tryCap(cp.a, cp.b, cp.radius, cp.ref); });
+  c.beams.forEach(b => tryCap(b.a, b.b, 0, { kind: 'laser', i: b.laser }));
   if (thinSel && thinT <= faceT + pixel * thinT * PX * 2) return thinSel;
   return faceSel;
 }

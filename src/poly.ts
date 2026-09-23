@@ -8,6 +8,10 @@ import { V3, add, cross, dot, len, mul, norm, sub } from './scene';
 
 export interface Hull {
   verts: V3[];
+  /** false for an imported mesh: faces are its triangles and may enclose a concave shape */
+  convex: boolean;
+  /** convex hull of the vertices, for clipping cuts against a concave mesh (lazy) */
+  outer?: Hull;
   /** vertex index rings, counter-clockwise seen from outside */
   faces: number[][];
   /** outward unit normals per face */
@@ -136,7 +140,7 @@ export function hull(verts: V3[]): Hull {
   }));
   const edges = [...edgeMap.values()].filter(e => e.faces.length === 2)
     .map(e => ({ a: e.a, b: e.b, faces: [e.faces[0], e.faces[1]] as [number, number] }));
-  return { verts, faces, normals: planes.map(p => p.n), edges };
+  return { verts, faces, normals: planes.map(p => p.n), edges, convex: true };
 }
 
 /** Newell normal of a ring, pointing away from `inside` */
@@ -151,8 +155,84 @@ export function faceNormal(ring: V3[], inside: V3): V3 {
   return dot(n, sub(c, inside)) < 0 ? mul(n, -1) : n;
 }
 
+/** edges of an indexed face list: pairs shared by exactly two faces */
+function edgesOf(faces: number[][]) {
+  const edgeMap = new Map<string, { a: number; b: number; faces: number[] }>();
+  faces.forEach((f, fi) => f.forEach((a, i) => {
+    const b = f[(i + 1) % f.length];
+    const key = a < b ? `${a}-${b}` : `${b}-${a}`;
+    const e = edgeMap.get(key) ?? { a: Math.min(a, b), b: Math.max(a, b), faces: [] };
+    e.faces.push(fi);
+    edgeMap.set(key, e);
+  }));
+  return [...edgeMap.values()].filter(e => e.faces.length === 2)
+    .map(e => ({ a: e.a, b: e.b, faces: [e.faces[0], e.faces[1]] as [number, number] }));
+}
+
+/** a Hull straight from an indexed mesh whose faces are already wound counter-clockwise outward */
+export function meshHull(verts: V3[], faces: number[][]): Hull {
+  const normals = faces.map(f => {
+    const ring = f.map(i => verts[i]);
+    let n: V3 = [0, 0, 0];
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i], b = ring[(i + 1) % ring.length];
+      n = add(n, [(a[1] - b[1]) * (a[2] + b[2]), (a[2] - b[2]) * (a[0] + b[0]), (a[0] - b[0]) * (a[1] + b[1])]);
+    }
+    return norm(n);
+  });
+  return { verts, faces, normals, edges: edgesOf(faces), convex: false };
+}
+
+/** parse a binary or ASCII STL into a mesh centred on its bounding box with max extent 1 */
+export function parseSTL(buf: ArrayBuffer): { verts: V3[]; faces: number[][] } {
+  const bytes = new Uint8Array(buf);
+  const head = new TextDecoder().decode(bytes.slice(0, 512));
+  const tris: { n: V3; v: [V3, V3, V3] }[] = [];
+  const isAscii = head.startsWith('solid') && /facet/.test(head);
+  if (isAscii) {
+    const text = new TextDecoder().decode(bytes);
+    const re = /facet\s+normal\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)[\s\S]*?vertex\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+vertex\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+vertex\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text))) {
+      const f = m.slice(1).map(Number);
+      tris.push({ n: [f[0], f[1], f[2]], v: [[f[3], f[4], f[5]], [f[6], f[7], f[8]], [f[9], f[10], f[11]]] });
+    }
+  } else {
+    const dv = new DataView(buf);
+    const n = dv.getUint32(80, true);
+    for (let i = 0; i < n; i++) {
+      const o = 84 + i * 50;
+      const f = (k: number) => dv.getFloat32(o + k * 4, true);
+      tris.push({ n: [f(0), f(1), f(2)], v: [[f(3), f(4), f(5)], [f(6), f(7), f(8)], [f(9), f(10), f(11)]] });
+    }
+  }
+  if (!tris.length) throw new Error('no triangles in STL');
+  const all = tris.flatMap(t => t.v);
+  const mins = [0, 1, 2].map(k => Math.min(...all.map(v => v[k]))), maxs = [0, 1, 2].map(k => Math.max(...all.map(v => v[k])));
+  const ctr = mins.map((lo, k) => (lo + maxs[k]) / 2), half = Math.max(...maxs.map((hi, k) => hi - mins[k])) / 2 || 1;
+  const verts: V3[] = [], index = new Map<string, number>();
+  const id = (v: V3) => {
+    const q: V3 = [(v[0] - ctr[0]) / half, (v[1] - ctr[1]) / half, (v[2] - ctr[2]) / half];
+    const key = q.map(x => x.toFixed(5)).join(',');
+    let i = index.get(key);
+    if (i === undefined) { i = verts.length; verts.push(q); index.set(key, i); }
+    return i;
+  };
+  const faces: number[][] = [];
+  for (const t of tris) {
+    const ids = t.v.map(id);
+    if (new Set(ids).size < 3) continue;
+    const [a, b, c] = ids.map(i => verts[i]);
+    let n = cross(sub(b, a), sub(c, a));
+    if (dot(n, t.n) < 0 && len(t.n) > 0) ids.reverse();
+    faces.push(ids);
+  }
+  return { verts, faces };
+}
+
 /** the polygon where the plane (unit normal n, dot(n, p) = d) cuts the hull; null if it misses */
 export function clipPlane(h: Hull, n: V3, d: number): V3[] | null {
+  if (!h.convex) h = h.outer ??= hull(h.verts);
   const scale = Math.max(...h.verts.flat().map(Math.abs)) || 1;
   const eps = 1e-7 * scale;
   const pts: V3[] = [];
