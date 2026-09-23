@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>infinity designer</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <button id="menu-btn" class="menu" aria-label="Toggle controls">☰</button>
+    <aside id="side">
+      <h1>infinity designer</h1>
+      <label>preset <select id="preset"></select></label>
+      <div id="panel"></div>
+      <section>
+        <h2>view</h2>
+        <label>bounces <span id="bounces-v"></span><input id="bounces" type="range" min="2" max="200" value="64"></label>
+        <label>exposure <span id="exposure-v"></span><input id="exposure" type="range" min="-6" max="6" step="0.1" value="-2"></label>
+        <label>render scale <span id="scale-v">1×</span><input id="scale" type="range" min="0.25" max="1" step="0.25" value="1"></label>
+        <label class="cb"><input id="wire" type="checkbox" checked> wireframe overlay</label>
+        <div class="row">
+          <button id="reset-eye">reset eye</button>
+          <button id="save">save json</button>
+          <label class="btn">open<input id="open" type="file" accept=".json" hidden></label>
+        </div>
+      </section>
+      <details>
+        <summary>scene json</summary>
+        <textarea id="json" spellcheck="false"></textarea>
+        <button id="apply" class="primary">apply json</button>
+      </details>
+      <p class="hint">click selects · drag orbits · wheel zooms · shift-drag pans · delete removes. Units are mm, +z faces you.</p>
+      <div id="status"></div>
+    </aside>
+    <main>
+      <canvas id="view"></canvas>
+      <div id="samples" class="hud"></div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

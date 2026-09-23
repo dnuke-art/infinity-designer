@@ -1,0 +1,5 @@
+id = "26280829-63a9-414e-b836-606d8c64fc5e"
+slug = "infinity-designer"
+name = "Infinity Designer"
+description = "Browser sandbox for designing infinity mirrors and LED light art: polyhedral shells, cutting-plane mirrors, edge LED strips, GPU path traced from the viewer's eye."
+tags = ["art", "infinity-mirror", "led", "simulation", "typescript", "browser", "webgl"]
